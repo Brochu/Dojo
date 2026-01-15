@@ -3,7 +3,7 @@
 
 int HoarePartition(char *arr, int lo, int hi)
 {
-    const char pivot = arr[(lo + hi) / 2];
+    const char pivot = arr[((hi - lo) / 2) + lo];
     int i = lo, j = hi;
 
     while (true)
@@ -25,14 +25,14 @@ void Quicksort(char *arr, int lo, int hi)
     int part = HoarePartition(arr, lo, hi);
 
     Quicksort(arr, lo, part);
-    Quicksort(arr, part + 1, hi);
+    Quicksort(arr, part+1, hi);
 }
 
 int main(int argc, char **argv)
 {
     printf("[MAIN] Sorting data using Quicksort\n");
 
-    std::vector<char> nums { 6, 22, 14, 78, 99, 30, 44, 59, 21, 17 };
+    std::vector<char> nums { 6, 22, 14, 78, 99, 30, 44, 59, 21, 17, 51 };
     printf("[MAIN] List before sorting : \n");
     for (const char& n : nums)
     {

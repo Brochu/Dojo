@@ -1,1 +1,1 @@
-g++ -std=c++14 -g -o sorts main.cpp
+cl -nologo -std:c++14 -Zi main.cpp -link -out:sorts.exe

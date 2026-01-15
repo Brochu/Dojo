@@ -30,3 +30,8 @@
 *.exe
 *.out
 *.app
+
+# My own ignores for MSVC
+*.ilk
+*.pdb
+*.rdi

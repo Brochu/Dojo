@@ -1,8 +1,8 @@
-# ArchPractice
-Practice writing some architecture for simple class structures
+# Programming Dojo
+My personal practice area for all things programming. Main categories are
 
-# LeetCode questions solutions
-Sometimes I prefer working on LeetCode solutions on my own dev environment
-
-# Interview Prep
-For technical interviews, I will try to practice more targetted problems or implementations
+* algorithms
+* common interview questions / tech interview prep
+* tooling (AI, etc)
+* design patterns
+* leetcode problem's solutions
