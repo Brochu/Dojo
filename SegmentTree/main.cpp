@@ -36,9 +36,9 @@ int main(int argc, char **argv)
 {
     int values[] = { 58, 62, 15, 92, 17, 80, 95, 0 };
     int n = sizeof(values) / sizeof(values[0]);
+    int m = 2 * n;
 
-    int sTree[2 * n];
-    int m = sizeof(sTree) / sizeof(sTree[0]);
+    int sTree[m];
     memset(sTree, 0, m * sizeof(sTree[0]));
     memcpy(sTree + n, values, n * sizeof(values[0]));
 
