@@ -1,96 +1,117 @@
 #include <cassert>
+#include <chrono>
 #include <cstdio>
+#include <initializer_list>
 #include <vector>
 
-enum class VehicleSize { SMALL, MEDIUM, LARGE };
+using Timestamp = std::chrono::steady_clock::time_point;
+using MinuteDuration = std::chrono::duration<double, std::chrono::minutes::period>;
+#define TimestampNow std::chrono::steady_clock::now()
+
+#define NUM_SIZES 3
+
+enum class Size { SMALL, MEDIUM, LARGE };
 
 class Vehicle {
-
 public:
-    Vehicle(VehicleSize s): size(s) { }
+    Vehicle(Size s): size(s) { }
 
-    VehicleSize size;
+    Size size;
 };
 
-//TODO: Maybe need subclasses for different parking sizes
 class ParkingSpot {
-
 public:
-    ParkingSpot() { }
+    Vehicle *assignedVehicle = nullptr;
+};
 
-    int Index; // This doesn't work
+struct ParkingTicket {
+    Size spotSize;
+    int spotIndex;
+};
+
+class PricingStrategy {
+    virtual int CalcPrice(int basePrice, Size spotSize, Timestamp start, Timestamp end) = 0;
+};
+
+class DurationBasedPricing : public PricingStrategy {
+    virtual int CalcPrice(int basePrice, Size spotSize, Timestamp start, Timestamp end) override {
+        return 0;
+    };
+};
+
+class SizeBasedPricing : public PricingStrategy {
+    virtual int CalcPrice(int basePrice, Size spotSize, Timestamp start, Timestamp end) override {
+        return 0;
+    };
 };
 
 class ParkingLot {
-
 public:
-    ParkingLot(int smallCount, int medCount, int largeCount) {
-        spotsSmall.resize(smallCount);
-        freeSmall.reserve(smallCount);
+    ParkingLot(int countSmall, int countMedium, int countLarge, std::initializer_list<PricingStrategy*> strats) {
+        int counts[NUM_SIZES] { countSmall, countMedium, countLarge };
 
-        spotsMedium.resize(medCount);
-        freeMedium.reserve(medCount);
+        for (int i = 0; i < NUM_SIZES; i++) {
+            pools[i].spots.resize(counts[i]);
+            pools[i].freelist.reserve(counts[i]);
 
-        spotsLarge.resize(largeCount);
-        freeLarge.reserve(largeCount);
+            for (int j = 0; j < counts[i]; j++) {
+                pools[i].freelist.push_back(j);
+            }
+        }
 
-        for (int i = 0; i < smallCount; i++) {
-            spotsSmall[i] = {};
-            freeSmall.push_back(i);
-        }
-        for (int i = 0; i < medCount; i++) {
-            spotsMedium[i] = {};
-            freeMedium.push_back(i);
-        }
-        for (int i = 0; i < largeCount; i++) {
-            spotsLarge[i] = {};
-            freeLarge.push_back(i);
-        }
+        strategies = strats;
     }
 
-    const ParkingSpot& PlaceVehicle(const Vehicle& v) {
-        std::vector<ParkingSpot> &spots = chooseSpots(v.size);
-        std::vector<int> &freelist = chooseFree(v.size);;
+    ParkingTicket PlaceVehicle(Vehicle& v) {
+        ParkingPool *pool = nullptr;
+        Size chosenSize = (Size)0;
 
-        const int index = freelist.back();
-        freelist.pop_back();
-        ParkingSpot &spot = spots[index];
+        for (int i = (int)v.size; i < NUM_SIZES; i++) {
+            if (!pools[i].freelist.empty()) {
+                pool = &pools[i];
+                chosenSize = (Size)i;
+                break;
+            }
+        }
 
-        return spot;
+        if (pool == nullptr) {
+            //TODO: Better parking full handling
+            assert(false && "Parking currently full");
+        }
+
+        int index = pool->freelist.back();
+        pool->freelist.pop_back();
+        ParkingSpot &spot = pool->spots[index];
+        spot.assignedVehicle = &v;
+
+        return { chosenSize, index };
     };
 
-    void RemoveVehicle(const Vehicle& v, const ParkingSpot& s) {
-        std::vector<int> &freelist = chooseFree(v.size);
-        freelist.push_back(s.Index);
+    void RemoveVehicle(ParkingTicket ticket) {
+        ParkingPool &pool = pools[(size_t)ticket.spotSize];
+        ParkingSpot &spot = pool.spots[ticket.spotIndex];
+
+        if (spot.assignedVehicle == nullptr) {
+            // Invalid ticket, spot already empty
+            return;
+        }
+
+        spot.assignedVehicle = nullptr;
+        pool.freelist.push_back(ticket.spotIndex);
     }
 
 private:
-    std::vector<ParkingSpot> spotsSmall;
-    std::vector<ParkingSpot> spotsMedium;
-    std::vector<ParkingSpot> spotsLarge;
+    struct ParkingPool {
+        std::vector<ParkingSpot> spots;
+        std::vector<int> freelist;
+    };
 
-    std::vector<int> freeSmall;
-    std::vector<int> freeMedium;
-    std::vector<int> freeLarge;
-
-    std::vector<ParkingSpot> &chooseSpots(VehicleSize s) {
-        switch (s) {
-            case VehicleSize::SMALL: return spotsSmall;
-            case VehicleSize::MEDIUM: return spotsMedium;
-            case VehicleSize::LARGE: return spotsLarge;
-            default: assert(false && "Invalid vehicle size");
-        }
-    }
-    std::vector<int> &chooseFree(VehicleSize s) {
-        switch (s) {
-            case VehicleSize::SMALL: return freeSmall;
-            case VehicleSize::MEDIUM: return freeMedium;
-            case VehicleSize::LARGE: return freeLarge;
-            default: assert(false && "Invalid vehicle size");
-        }
-    }
+    ParkingPool pools[NUM_SIZES];
+    std::vector<PricingStrategy*> strategies;
 };
 
 int main() {
-    printf("Hello world\n");
+    PricingStrategy *strats[] {
+    };
+    ParkingLot lot(10, 50, 10);
 }
