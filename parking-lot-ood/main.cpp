@@ -1,5 +1,6 @@
 #include <cassert>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <initializer_list>
 #include <vector>
@@ -27,27 +28,45 @@ public:
 struct ParkingTicket {
     Size spotSize;
     int spotIndex;
+    Timestamp entryTime;
 };
 
 class PricingStrategy {
+public:
     virtual int CalcPrice(int basePrice, Size spotSize, Timestamp start, Timestamp end) = 0;
 };
 
 class DurationBasedPricing : public PricingStrategy {
+public:
     virtual int CalcPrice(int basePrice, Size spotSize, Timestamp start, Timestamp end) override {
-        return 0;
+        MinuteDuration d = end - start;
+        return (int)ceil(basePrice * d.count());
     };
 };
 
 class SizeBasedPricing : public PricingStrategy {
+public:
     virtual int CalcPrice(int basePrice, Size spotSize, Timestamp start, Timestamp end) override {
-        return 0;
+        switch (spotSize) {
+
+        case Size::SMALL: return 2;
+        case Size::MEDIUM: return 4;
+        case Size::LARGE: return 5;
+        default: return 0;
+
+        }
     };
 };
 
 class ParkingLot {
 public:
-    ParkingLot(int countSmall, int countMedium, int countLarge, std::initializer_list<PricingStrategy*> strats) {
+    ParkingLot(
+        int countSmall,
+        int countMedium,
+        int countLarge,
+        std::initializer_list<PricingStrategy*> strats)
+    : strategies(strats)
+    {
         int counts[NUM_SIZES] { countSmall, countMedium, countLarge };
 
         for (int i = 0; i < NUM_SIZES; i++) {
@@ -58,8 +77,6 @@ public:
                 pools[i].freelist.push_back(j);
             }
         }
-
-        strategies = strats;
     }
 
     ParkingTicket PlaceVehicle(Vehicle& v) {
@@ -84,7 +101,18 @@ public:
         ParkingSpot &spot = pool->spots[index];
         spot.assignedVehicle = &v;
 
-        return { chosenSize, index };
+        return { chosenSize, index, std::chrono::steady_clock::now() };
+    };
+
+    int CalcPrice(ParkingTicket ticket) {
+        Timestamp entry = ticket.entryTime;
+        Timestamp now = std::chrono::steady_clock::now();
+        int price = 0;
+
+        for (int i = 0; i < strategies.size(); i++) {
+            price = strategies[i]->CalcPrice(price, ticket.spotSize, entry, now);
+        }
+        return price;
     };
 
     void RemoveVehicle(ParkingTicket ticket) {
@@ -111,7 +139,10 @@ private:
 };
 
 int main() {
-    PricingStrategy *strats[] {
-    };
-    ParkingLot lot(10, 50, 10);
+    DurationBasedPricing duration_pricing;
+    SizeBasedPricing size_pricing;
+
+    ParkingLot lot(10, 50, 10, { &size_pricing, &duration_pricing });
+
+    printf("[MAIN] Parking Lot Tests\n");
 }
