@@ -7,7 +7,6 @@
 
 using Timestamp = std::chrono::steady_clock::time_point;
 using MinuteDuration = std::chrono::duration<double, std::chrono::minutes::period>;
-#define TimestampNow std::chrono::steady_clock::now()
 
 #define NUM_SIZES 3
 
@@ -25,7 +24,13 @@ public:
     Vehicle *assignedVehicle = nullptr;
 };
 
-struct ParkingTicket {
+class ParkingTicket {
+    friend class ParkingLot;
+
+    ParkingTicket(Size size, int index, Timestamp time)
+        : spotSize(size), spotIndex(index), entryTime(time)
+    {}
+
     Size spotSize;
     int spotIndex;
     Timestamp entryTime;
@@ -33,6 +38,7 @@ struct ParkingTicket {
 
 class PricingStrategy {
 public:
+    virtual ~PricingStrategy() = default;
     virtual int CalcPrice(int basePrice, Size spotSize, Timestamp start, Timestamp end) = 0;
 };
 
