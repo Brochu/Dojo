@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <cstdio>
+#include <ppltasks.h>
 #include <vector>
 
 enum class Direction { UP, DOWN };
@@ -10,6 +11,14 @@ struct Elevator {
 
     std::vector<int> up_stops;
     std::vector<int> down_stops;
+};
+
+void elevator_add_stop(Elevator *e, int floor) {
+    //TODO: Keep stops vectors ordered; find insert pos based on direction
+    if (e->direction == Direction::UP) {
+    }
+    else if (e->direction == Direction::DOWN) {
+    }
 };
 
 class PickStrategy {
@@ -38,6 +47,25 @@ public:
         int elevator_id = 0;
         strategy->NextAvailable(floor, dir, elevator_id);
         Elevator &e = elevators[elevator_id];
+
+        if (e.up_stops.empty() && e.down_stops.empty()) {
+            if (floor == e.floor) {
+                e.direction = dir;
+            }
+            else {
+                if (floor - e.floor > 0) {
+                    e.direction = Direction::UP;
+                    e.up_stops.push_back(floor);
+                }
+                else {
+                    e.direction = Direction::DOWN;
+                    e.down_stops.push_back(floor);
+                }
+            }
+        }
+        else {
+            //TODO: Find good spot in one of the stops vectors
+        }
     }
 
     void SelectFloor(int elevator_id, int floor) {
