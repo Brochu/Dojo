@@ -80,12 +80,13 @@ public:
         if (elevator_id < 0 || elevator_id >= elevators.size()) {
             return;
         }
-        if (floor < 0 || floor > floors_count) {
+        Elevator &e = elevators[elevator_id];
+
+        if (floor < 0 || floor > floors_count || floor == e.floor) {
             return;
         }
 
-        Elevator &e = elevators[elevator_id];
-        elevator_add_stop(&e, floor, e.direction);
+        elevator_add_stop(&e, floor, (floor - e.floor > 0) ? Direction::UP : Direction::DOWN);
     }
 
     void Step() {
