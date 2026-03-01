@@ -17,26 +17,38 @@ void elevator_add_stop(Elevator *e, int floor, Direction dir) {
         while (pos != e->up_stops.end() && (*pos) < floor) {
             pos++;
         }
-        e->up_stops.emplace(pos, floor);
+        if (pos == e->up_stops.end() || (*pos) != floor) {
+            e->up_stops.emplace(pos, floor);
+        }
     }
     else if (dir == Direction::DOWN) {
         auto pos = e->down_stops.begin();
         while (pos != e->down_stops.end() && (*pos) > floor) {
             pos++;
         }
-        e->down_stops.emplace(pos, floor);
+        if (pos == e->down_stops.end() || (*pos) != floor) {
+            e->down_stops.emplace(pos, floor);
+        }
     }
-    //TODO: Need logic to avoid duplicates
 };
 
 class PickStrategy {
 public:
-    virtual bool NextAvailable(int floor, Direction dir, int &elevator_id) = 0;
+    virtual bool NextAvailable(int floor, Direction dir, std::vector<Elevator> &elevators, int &elevator_id) = 0;
 };
 
 class FirstFreeStrategy : public PickStrategy{
 public:
-    virtual bool NextAvailable(int floor, Direction dir, int &elevator_id) override {
+    virtual bool NextAvailable(int floor, Direction dir, std::vector<Elevator> &elevators, int &elevator_id) override {
+        elevator_id = -1;
+
+        for (int i = 0; i < elevators.size(); i++) {
+            if (elevators[i].direction == dir) {
+                elevator_id = i;
+                return true;
+            }
+        }
+
         return false;
     }
 };
@@ -53,7 +65,7 @@ public:
         }
 
         int elevator_id = 0;
-        strategy->NextAvailable(floor, dir, elevator_id);
+        strategy->NextAvailable(floor, dir, elevators, elevator_id);
         Elevator &e = elevators[elevator_id];
 
         if (e.up_stops.empty() && e.down_stops.empty()) {
@@ -93,7 +105,38 @@ public:
         //TODO: Any point in making these update in parallel? Probably not for 3 elevators
         // They do not impact eachother should not require too much synchronization
         for (Elevator &e : elevators) {
-            //TODO: Process elevators
+            if (e.direction == Direction::UP) {
+                if (e.up_stops.empty()) {
+                    continue;
+                }
+
+                int target = e.up_stops.front();
+                if (e.floor == target) {
+                    e.up_stops.erase(e.up_stops.begin());
+                    if (e.up_stops.empty() && !e.down_stops.empty()) {
+                        e.direction = Direction::DOWN;
+                    }
+                }
+                else {
+                    e.floor++;
+                }
+            }
+            else if (e.direction == Direction::DOWN) {
+                if (e.down_stops.empty()) {
+                    continue;
+                }
+
+                int target = e.down_stops.front();
+                if (e.floor == target) {
+                    e.down_stops.erase(e.down_stops.begin());
+                    if (e.down_stops.empty() && !e.up_stops.empty()) {
+                        e.direction = Direction::UP;
+                    }
+                }
+                else {
+                    e.floor--;
+                }
+            }
         }
     }
 
