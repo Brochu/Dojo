@@ -1,6 +1,4 @@
-#include <algorithm>
 #include <cstdio>
-#include <ppltasks.h>
 #include <vector>
 
 enum class Direction { UP, DOWN };
@@ -13,12 +11,22 @@ struct Elevator {
     std::vector<int> down_stops;
 };
 
-void elevator_add_stop(Elevator *e, int floor) {
-    //TODO: Keep stops vectors ordered; find insert pos based on direction
-    if (e->direction == Direction::UP) {
+void elevator_add_stop(Elevator *e, int floor, Direction dir) {
+    if (dir == Direction::UP) {
+        auto pos = e->up_stops.begin();
+        while (pos != e->up_stops.end() && (*pos) < floor) {
+            pos++;
+        }
+        e->up_stops.emplace(pos, floor);
     }
-    else if (e->direction == Direction::DOWN) {
+    else if (dir == Direction::DOWN) {
+        auto pos = e->down_stops.begin();
+        while (pos != e->down_stops.end() && (*pos) > floor) {
+            pos++;
+        }
+        e->down_stops.emplace(pos, floor);
     }
+    //TODO: Need logic to avoid duplicates
 };
 
 class PickStrategy {
@@ -64,7 +72,7 @@ public:
             }
         }
         else {
-            //TODO: Find good spot in one of the stops vectors
+            elevator_add_stop(&e, floor, dir);
         }
     }
 
@@ -75,12 +83,16 @@ public:
         if (floor < 0 || floor > floors_count) {
             return;
         }
+
+        Elevator &e = elevators[elevator_id];
+        elevator_add_stop(&e, floor, e.direction);
     }
 
     void Step() {
         //TODO: Any point in making these update in parallel? Probably not for 3 elevators
         // They do not impact eachother should not require too much synchronization
         for (Elevator &e : elevators) {
+            //TODO: Process elevators
         }
     }
 
