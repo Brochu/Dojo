@@ -38,26 +38,35 @@ public:
     }
 
     bool Search(const char *str) {
-        Node *n = FindNode(str);
+        Node *n = FindNode(root, str);
         return n != nullptr && n->is_final;
     }
 
     bool StartsWith(const char *str) {
-        Node *n = FindNode(str);
+        Node *n = FindNode(root, str);
         return n != nullptr;
     }
 
     bool WildcardSearch(const char *pattern) {
-        return false;
+        return WildcardSearchInner(root, pattern);
     }
 
     void PrefixCollect(const char *prefix, const char **results, int32_t max_results, int32_t &count) {
-        count = 0;
+        Node *start = FindNode(root, prefix);
+
+        if (start == nullptr) {
+            count = 0;
+            return;
+        }
+
+        char buffer[word_max_len];
+        PrefixCollectInner(start, buffer, 0, prefix, results, max_results, count);
     }
 
 private:
     static constexpr int32_t nodes_max_count = 1024;
     static constexpr int32_t alphabet_size = 26;
+    static constexpr int32_t word_max_len = 128;
     struct Node {
         bool is_final = false;
         Node *children[alphabet_size];
@@ -68,9 +77,9 @@ private:
 
     Node *root = nullptr;
 
-    Node *FindNode(const char *str) {
+    Node *FindNode(Node *start, const char *str) {
         const size_t len = strlen(str);
-        Node *current = root;
+        Node *current = start;
 
         for (int32_t i = 0; i < len; i++) {
             int32_t index = str[i] - 'a';
@@ -82,6 +91,35 @@ private:
         }
 
         return current;
+    }
+
+    bool WildcardSearchInner(Node *node, const char *str) {
+        if (node == nullptr) {
+            return false;
+        }
+
+        const size_t len = strlen(str);
+        if (str[0] == '\0') {
+            return node->is_final;
+        }
+
+        int32_t index = str[0] - 'a';
+        if (str[0] != '.') {
+            return WildcardSearchInner(node->children[index], str+1);
+        }
+
+        bool res = false;
+        for (int32_t i = 0; i < alphabet_size; i++) {
+            res |= WildcardSearchInner(node->children[i], str+1);
+        }
+        return res;
+    }
+
+    void PrefixCollectInner(Node *node, char word[word_max_len], int32_t depth, const char *prefix, const char **results, int32_t max_results, int32_t &count) {
+        //todo; find letter based off of node?
+        if (node == nullptr || count >= max_results) {
+            return;
+        }
     }
 };
 
