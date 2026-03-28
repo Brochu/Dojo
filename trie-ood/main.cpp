@@ -51,16 +51,20 @@ public:
         return WildcardSearchInner(root, pattern);
     }
 
-    void PrefixCollect(const char *prefix, const char **results, int32_t max_results, int32_t &count) {
+    void PrefixCollect(const char *prefix, char results[][64], int32_t max_results, int32_t &count) {
         Node *start = FindNode(root, prefix);
 
-        if (start == nullptr) {
+        if (start == nullptr || max_results == 0) {
             count = 0;
             return;
         }
+        assert(results != nullptr);
 
         char buffer[word_max_len];
-        PrefixCollectInner(start, buffer, 0, prefix, results, max_results, count);
+        memset(buffer, 0, sizeof(char) * word_max_len);
+        strcpy_s(buffer, prefix);
+
+        PrefixCollectInner(start, buffer, strlen(prefix), results, max_results, count);
     }
 
 private:
@@ -115,11 +119,20 @@ private:
         return res;
     }
 
-    void PrefixCollectInner(Node *node, char word[word_max_len], int32_t depth, const char *prefix, const char **results, int32_t max_results, int32_t &count) {
-        //todo; find letter based off of node?
+    void PrefixCollectInner(Node *node, char word[word_max_len], int32_t depth, char results[][64], int32_t max_results, int32_t &count) {
         if (node == nullptr || count >= max_results) {
             return;
         }
+
+        if (node->is_final) {
+            strcpy_s(results[count++], 64, word);
+        }
+
+        for (int32_t i = 0; i < alphabet_size; i++) {
+            word[depth] = 'a' + i;
+            PrefixCollectInner(node->children[i], word, depth+1, results, max_results, count);
+        }
+        word[depth] = '\0';
     }
 };
 
@@ -260,17 +273,19 @@ int main()
         trie.Insert("hero");
         trie.Insert("world");
 
-        const char *results[8];
+        char results[8][64];
         int32_t count = 0;
 
         trie.PrefixCollect("hel", results, 8, count);
-        assert(count == 2); // "hello" and "help"
+        assert(count == 2);
+        count = 0;
 
         trie.PrefixCollect("her", results, 8, count);
-        assert(count == 1); // "hero"
+        assert(count == 1);
+        count = 0;
 
         trie.PrefixCollect("wo", results, 8, count);
-        assert(count == 1); // "world"
+        assert(count == 1);
     }
 
     // 13. Prefix collect, no matches
@@ -278,7 +293,7 @@ int main()
         Trie trie;
         trie.Insert("hello");
 
-        const char *results[8];
+        char results[8][64];
         int32_t count = 0;
 
         trie.PrefixCollect("xyz", results, 8, count);
@@ -293,7 +308,7 @@ int main()
         trie.Insert("ac");
         trie.Insert("ad");
 
-        const char *results[2];
+        char results[2][64];
         int32_t count = 0;
 
         trie.PrefixCollect("a", results, 2, count);
@@ -307,11 +322,11 @@ int main()
         trie.Insert("hello");
         trie.Insert("help");
 
-        const char *results[8];
+        char results[8][64];
         int32_t count = 0;
 
         trie.PrefixCollect("he", results, 8, count);
-        assert(count == 3); // "he", "hello", "help"
+        assert(count == 3);
     }
 
     // 16. Prefix collect, empty prefix returns all words
@@ -320,7 +335,7 @@ int main()
         trie.Insert("abc");
         trie.Insert("xyz");
 
-        const char *results[8];
+        char results[8][64];
         int32_t count = 0;
 
         trie.PrefixCollect("", results, 8, count);
