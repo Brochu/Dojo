@@ -219,7 +219,7 @@ void bvh_build(BVH *bvh, const Triangle *tris, uint32_t tri_count, uint32_t max_
 void bvh_build_inner(BVH *bvh, uint32_t node_idx, uint32_t tri_offset, uint32_t tri_count, uint32_t max_prims_per_leaf) {
     AABB bounds = {};
     for (uint32_t i = tri_offset; i < (tri_offset + tri_count); i++) {
-        aabb_union(bounds, triangle_bounds(bvh->prims[i]));
+        bounds = aabb_union(bounds, triangle_bounds(bvh->prims[i]));
     }
     bvh->nodes[node_idx].bounds = bounds;
 
@@ -276,7 +276,12 @@ void bvh_build_inner(BVH *bvh, uint32_t node_idx, uint32_t tri_offset, uint32_t 
 
 // Find the closest hit along `ray` in [t_min, t_max).
 HitRecord bvh_intersect(const BVH *bvh, Ray ray, float t_min, float t_max) {
-    return {};
+    HitRecord rec;
+    rec.hit = false;
+    rec.prim_index = 0;
+    rec.t = 0.f;
+
+    return rec;
 }
 
 // Free everything allocated by bvh_build.
