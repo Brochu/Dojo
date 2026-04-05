@@ -4,9 +4,11 @@
 #include <cmath>
 #include <cstring>
 #include <cfloat>
+#include <utility>
 
 #define min(a, b) ((a < b) ? a : b)
 #define max(a, b) ((a > b) ? a : b)
+#define EPSILON 0.0001f
 
 // ============================================================================
 // Core types
@@ -45,27 +47,61 @@ struct Ray {
 };
 
 struct AABB {
-    Vec3 min;
-    Vec3 max;
+    Vec3 min = { FLT_MAX, FLT_MAX, FLT_MAX };
+    Vec3 max = { FLT_MIN, FLT_MIN, FLT_MIN };
 };
 
-// Returns the centroid of the box — useful during build
 Vec3 aabb_centroid(AABB box) {
-    return { (box.max.x - box.max.x)/2.f, (box.max.y - box.min.y)/2.f, (box.max.z - box.min.z)/2.f };
+    return vec3_mul(vec3_sub(box.max, box.min), 2.f);
 }
 
-// Expand `box` to also contain `other`
-AABB aabb_union(AABB box, AABB other);
+AABB aabb_union(AABB box, AABB other) {
+    return { vec3_min(box.min, other.min), vec3_max(box.max, other.max) };
+}
 
-// Expand `box` to contain point `p`
-AABB aabb_expand(AABB box, Vec3 p);
+AABB aabb_expand(AABB box, Vec3 p) {
+    return { vec3_min(box.min, p), vec3_max(box.max, p) };
+}
+
+bool aabb_contains(AABB box, Vec3 point) {
+    return point.x >= box.min.x && point.x <= box.max.x &&
+           point.y >= box.min.y && point.y <= box.max.y &&
+           point.z >= box.min.z && point.z <= box.max.z;
+}
 
 // Slab test. Returns true if ray hits the box within [t_min, t_max).
 // Writes the entry t into `t_out` on hit.
 // Use the standard min/max-of-slabs approach, handle inv_dir = inf gracefully.
 bool aabb_intersect(AABB box, Ray ray, float t_min, float t_max, float *t_out) {
-    *t_out = 0.f;
-    return false;
+    float start_t = t_min;
+    float end_t = t_max;
+
+    for (int32_t axis = 0; axis < 3; ++axis) {
+        float o = ((float*)(&ray.origin.x))[axis];
+        float d = ((float*)(&ray.dir.x))[axis];
+        float val0 = ((float*)(&box.min.x))[axis];
+        float val1 = ((float*)(&box.max.x))[axis];
+        if (abs(d) < EPSILON) {
+            if (o < val0 || o > val1) {
+                return false;
+            }
+            continue;
+        }
+
+        float x0 = (val0 - o) / d;
+        float x1 = (val1 - o) / d;
+
+        start_t = max(start_t, min(x0, x1));
+        end_t = min(end_t, max(x0, x1));
+    }
+
+    if (start_t > end_t) {
+        *t_out = 0.f;
+        return false;
+    }
+
+    *t_out = start_t;
+    return true;
 }
 
 // ============================================================================
@@ -79,12 +115,45 @@ struct Triangle {
 // Möller–Trumbore. Returns true on hit within [t_min, t_max).
 // Writes hit t into `t_out`.
 bool triangle_intersect(Triangle tri, Ray ray, float t_min, float t_max, float *t_out) {
-    *t_out = 0.f;
-    return false;
+    Vec3 v0v1 = vec3_sub(tri.v1, tri.v0);
+    Vec3 v0v2 = vec3_sub(tri.v2, tri.v0);
+    Vec3 pvec = vec3_cross(ray.dir, v0v2);
+
+    float det = vec3_dot(v0v1, pvec);
+    if (abs(det) < EPSILON) {
+        *t_out = 0.f;
+        return false;
+    }
+    float inv_det = 1.f / det;
+
+    Vec3 tvec = vec3_sub(ray.origin, tri.v0);
+    float u = vec3_dot(tvec, pvec) * inv_det;
+    if (u < 0 || u > 1) {
+        *t_out = 0.f;
+        return false;
+    }
+
+    Vec3 qvec = vec3_cross(tvec, v0v1);
+    float v = vec3_dot(ray.dir, qvec) * inv_det;
+    if (v < 0 || v + u > 1) {
+        *t_out = 0.f;
+        return false;
+    }
+
+    float t = vec3_dot(v0v2, qvec) * inv_det;
+    if (t < t_min || t > t_max) {
+        *t_out = 0.f;
+        return false;
+    }
+
+    *t_out = t;
+    return true;
 }
 
 // Returns the AABB that tightly encloses the triangle
-AABB triangle_bounds(Triangle tri);
+AABB triangle_bounds(Triangle tri) {
+    return { vec3_min(vec3_min(tri.v0, tri.v1), tri.v2), vec3_max(vec3_max(tri.v0, tri.v1), tri.v2) };
+}
 
 // ============================================================================
 // BVH
@@ -119,10 +188,90 @@ struct HitRecord {
     bool hit;
 };
 
+uint32_t bvh_alloc_node(BVH *bvh) {
+    if (bvh->node_count >= bvh->node_capacity) {
+        bvh->node_capacity *= 2;
+        bvh->nodes = (BVHNode*)realloc(bvh->nodes, bvh->node_capacity * sizeof(BVHNode));
+    }
+
+    return bvh->node_count++;
+};
+
+void bvh_build_inner(BVH *bvh, uint32_t node_idx, uint32_t tri_offset, uint32_t tri_count, uint32_t max_prims_per_leaf);
+
 // Build a BVH over `tris[0..tri_count)`.
 // Strategy: longest-axis midpoint split, recurse until leaf has <= max_prims.
 // The BVH takes ownership of its own copies of the data — caller keeps theirs.
 void bvh_build(BVH *bvh, const Triangle *tris, uint32_t tri_count, uint32_t max_prims_per_leaf) {
+    static constexpr int32_t default_node_count = 128;
+    bvh->node_capacity = default_node_count;
+    bvh->node_count = 0;
+    bvh->nodes = (BVHNode*)calloc(default_node_count, sizeof(BVHNode));
+
+    bvh->prim_count = tri_count;
+    bvh->prims = (Triangle*)calloc(tri_count, sizeof(Triangle));
+    memcpy_s(bvh->prims, sizeof(Triangle) * bvh->prim_count, tris, sizeof(Triangle) * tri_count);
+
+    uint32_t root_idx = bvh_alloc_node(bvh);
+    return bvh_build_inner(bvh, root_idx, 0, tri_count, max_prims_per_leaf);
+}
+
+void bvh_build_inner(BVH *bvh, uint32_t node_idx, uint32_t tri_offset, uint32_t tri_count, uint32_t max_prims_per_leaf) {
+    AABB bounds = {};
+    for (uint32_t i = tri_offset; i < (tri_offset + tri_count); i++) {
+        aabb_union(bounds, triangle_bounds(bvh->prims[i]));
+    }
+    bvh->nodes[node_idx].bounds = bounds;
+
+    if (tri_count <= max_prims_per_leaf) {
+        bvh->nodes[node_idx].prim_offset = tri_offset;
+        bvh->nodes[node_idx].prim_count = tri_count;
+        return;
+    }
+
+    Vec3 center = aabb_centroid(bounds);
+    uint32_t lo = tri_offset;
+    uint32_t hi = tri_offset + tri_count - 1;
+    auto partition = [&](float part_val, int axis_idx) {
+        while(lo < hi) {
+            Vec3 tri_center = aabb_centroid(triangle_bounds(bvh->prims[lo]));
+            float target = ((float*)&tri_center)[axis_idx];
+            if (target > part_val) {
+                std::swap(bvh->prims[lo], bvh->prims[hi]);
+                hi--;
+            } else {
+                lo++;
+            }
+        }
+    };
+
+    float width = bounds.max.x - bounds.min.x;
+    float height = bounds.max.y - bounds.min.y;
+    float depth = bounds.max.z - bounds.min.z;
+    if (width > height && width > depth) {
+        partition(center.x, 0);
+    }
+    else if (height > width && height > depth) {
+        partition(center.y, 1);
+    }
+    else if (depth > width && depth > height) {
+        partition(center.z, 2);
+    }
+
+    uint32_t left_count = lo - tri_offset;
+    uint32_t right_count = (tri_offset + tri_count) - lo;
+    if (left_count == 0 || right_count == 0) {
+        // In case the partition is the worst case, all on one side
+        lo = tri_offset + (tri_count / 2);
+    }
+
+    uint32_t left_idx = bvh_alloc_node(bvh);
+    uint32_t right_idx = bvh_alloc_node(bvh);
+    bvh->nodes[node_idx].left = left_idx;
+    bvh->nodes[node_idx].right = right_idx;
+
+    bvh_build_inner(bvh, left_idx, tri_offset, lo - tri_offset, max_prims_per_leaf);
+    bvh_build_inner(bvh, right_idx, lo, (tri_offset + tri_count) - lo, max_prims_per_leaf);
 }
 
 // Find the closest hit along `ray` in [t_min, t_max).
@@ -132,6 +281,14 @@ HitRecord bvh_intersect(const BVH *bvh, Ray ray, float t_min, float t_max) {
 
 // Free everything allocated by bvh_build.
 void bvh_free(BVH *bvh) {
+    bvh->prim_count = 0;
+    free(bvh->prims);
+    bvh->prims = nullptr;
+
+    bvh->node_count = 0;
+    bvh->node_capacity = 0;
+    free(bvh->nodes);
+    bvh->nodes = nullptr;
 }
 
 
