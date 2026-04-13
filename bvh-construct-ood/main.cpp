@@ -269,17 +269,37 @@ void bvh_build_inner(BVH *bvh, uint32_t node_idx, uint32_t tri_offset, uint32_t 
     uint32_t right_idx = bvh_alloc_node(bvh);
     bvh->nodes[node_idx].left = left_idx;
     bvh->nodes[node_idx].right = right_idx;
+    bvh->nodes[node_idx].prim_count = 0;
 
     bvh_build_inner(bvh, left_idx, tri_offset, lo - tri_offset, max_prims_per_leaf);
     bvh_build_inner(bvh, right_idx, lo, (tri_offset + tri_count) - lo, max_prims_per_leaf);
 }
 
+HitRecord bvh_intersect_inner(const BVH* bvh, uint32_t node_idx, Ray ray, float t_min, float t_max);
+
 // Find the closest hit along `ray` in [t_min, t_max).
 HitRecord bvh_intersect(const BVH *bvh, Ray ray, float t_min, float t_max) {
-    HitRecord rec;
-    rec.hit = false;
-    rec.prim_index = 0;
-    rec.t = 0.f;
+    return bvh_intersect_inner(bvh, 0, ray, t_min, t_max);
+}
+
+HitRecord bvh_intersect_inner(const BVH* bvh, uint32_t node_idx, Ray ray, float t_min, float t_max) {
+    HitRecord rec {};
+    float t_out = 0;
+    BVHNode *node = &bvh->nodes[node_idx];
+
+    if (node == nullptr || !aabb_intersect(node->bounds, ray, t_min, t_max, &t_out)) {
+        rec.hit = false;
+        rec.prim_index = 0;
+        rec.t = 0.f;
+        return rec;
+    }
+
+    if (bvh->nodes[node_idx].prim_count > 0) {
+        HitRecord current {};
+        for (uint32_t i = node->prim_offset; i < node->prim_offset + node->prim_count; i++) {
+            //TODO: Need bvh pointer here to access prims
+        }
+    }
 
     return rec;
 }
