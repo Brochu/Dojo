@@ -52,7 +52,7 @@ struct AABB {
 };
 
 Vec3 aabb_centroid(AABB box) {
-    return vec3_mul(vec3_sub(box.max, box.min), 2.f);
+    return vec3_mul(vec3_add(box.min, box.max), 0.5f);
 }
 
 AABB aabb_union(AABB box, AABB other) {
@@ -194,7 +194,10 @@ uint32_t bvh_alloc_node(BVH *bvh) {
         bvh->nodes = (BVHNode*)realloc(bvh->nodes, bvh->node_capacity * sizeof(BVHNode));
     }
 
-    return bvh->node_count++;
+    uint32_t new_idx = bvh->node_count++;
+    bvh->nodes[new_idx].left = UINT32_MAX;
+    bvh->nodes[new_idx].right = UINT32_MAX;
+    return new_idx;
 };
 
 void bvh_build_inner(BVH *bvh, uint32_t node_idx, uint32_t tri_offset, uint32_t tri_count, uint32_t max_prims_per_leaf);
@@ -248,13 +251,13 @@ void bvh_build_inner(BVH *bvh, uint32_t node_idx, uint32_t tri_offset, uint32_t 
     float width = bounds.max.x - bounds.min.x;
     float height = bounds.max.y - bounds.min.y;
     float depth = bounds.max.z - bounds.min.z;
-    if (width > height && width > depth) {
+    if (width >= height && width >= depth) {
         partition(center.x, 0);
     }
-    else if (height > width && height > depth) {
+    else if (height >= width && height >= depth) {
         partition(center.y, 1);
     }
-    else if (depth > width && depth > height) {
+    else if (depth >= width && depth >= height) {
         partition(center.z, 2);
     }
 
@@ -283,25 +286,36 @@ HitRecord bvh_intersect(const BVH *bvh, Ray ray, float t_min, float t_max) {
 }
 
 HitRecord bvh_intersect_inner(const BVH* bvh, uint32_t node_idx, Ray ray, float t_min, float t_max) {
-    HitRecord rec {};
     float t_out = 0;
     BVHNode *node = &bvh->nodes[node_idx];
 
-    if (node == nullptr || !aabb_intersect(node->bounds, ray, t_min, t_max, &t_out)) {
-        rec.hit = false;
-        rec.prim_index = 0;
-        rec.t = 0.f;
-        return rec;
+    if (node_idx >= bvh->node_count || !aabb_intersect(node->bounds, ray, t_min, t_max, &t_out)) {
+        return { FLT_MAX, 0, false };
     }
 
     if (bvh->nodes[node_idx].prim_count > 0) {
-        HitRecord current {};
+        HitRecord cur_hit {};
+        cur_hit.hit = false;
+        cur_hit.prim_index = 0;
+        cur_hit.t = FLT_MAX;
+
+        float cur_t = 0;
         for (uint32_t i = node->prim_offset; i < node->prim_offset + node->prim_count; i++) {
-            //TODO: Need bvh pointer here to access prims
+            if (triangle_intersect(bvh->prims[i], ray, t_min, t_max, &cur_t) && cur_t < cur_hit.t) {
+                cur_hit.hit = true;
+                cur_hit.prim_index = i;
+                cur_hit.t = cur_t;
+            }
         }
+
+        return cur_hit;
     }
 
-    return rec;
+    // There might be a small optim here modifying the t_min to t_max based on current bounds?
+    HitRecord l_hit = bvh_intersect_inner(bvh, node->left, ray, t_min, t_max);
+    HitRecord r_hit = bvh_intersect_inner(bvh, node->right, ray, t_min, (l_hit.hit) ? l_hit.t : t_max);
+
+    return (l_hit.t < r_hit.t) ? l_hit : r_hit;
 }
 
 // Free everything allocated by bvh_build.
@@ -484,6 +498,142 @@ static void test_bvh_separated_triangles() {
     printf("[PASS] bvh separated triangles\n");
 }
 
+static void test_bvh_grid_of_triangles() {
+    // 4x4 grid of small triangles on the XY plane at z=0,
+    // spaced 3 units apart so the BVH actually has to split
+    Triangle tris[16];
+    int idx = 0;
+    for (int y = 0; y < 4; y++) {
+        for (int x = 0; x < 4; x++) {
+            float cx = x * 3.0f;
+            float cy = y * 3.0f;
+            tris[idx++] = {
+                {cx - 0.5f, cy - 0.5f, 0},
+                {cx + 0.5f, cy - 0.5f, 0},
+                {cx,        cy + 0.5f, 0}
+            };
+        }
+    }
+
+    BVH bvh;
+    memset(&bvh, 0, sizeof(bvh));
+    bvh_build(&bvh, tris, 16, 2);
+
+    // Hit the triangle at grid position (2, 3) -> center at (6, 9, 0)
+    {
+        Ray ray = {{6, 9, -5}, {0, 0, 1}};
+        HitRecord rec = bvh_intersect(&bvh, ray, 0.0f, FLT_MAX);
+        assert(rec.hit && fabsf(rec.t - 5.0f) < 1e-4f);
+    }
+    // Hit the triangle at grid position (0, 0) -> center at (0, 0, 0)
+    {
+        Ray ray = {{0, 0, -10}, {0, 0, 1}};
+        HitRecord rec = bvh_intersect(&bvh, ray, 0.0f, FLT_MAX);
+        assert(rec.hit && fabsf(rec.t - 10.0f) < 1e-4f);
+    }
+    // Miss — ray goes through a gap between triangles
+    {
+        Ray ray = {{1.5f, 1.5f, -5}, {0, 0, 1}};
+        HitRecord rec = bvh_intersect(&bvh, ray, 0.0f, FLT_MAX);
+        assert(!rec.hit);
+    }
+    // Diagonal ray hitting a corner triangle
+    {
+        Ray ray = {{-5, -5, -5}, {0.577f, 0.577f, 0.577f}};
+        HitRecord rec = bvh_intersect(&bvh, ray, 0.0f, FLT_MAX);
+        assert(rec.hit);
+    }
+
+    bvh_free(&bvh);
+    printf("[PASS] bvh grid of triangles\n");
+}
+
+static void test_bvh_depth_layers() {
+    // 5 triangles stacked along Z at different depths
+    // Tests that closest hit is always returned correctly
+    Triangle tris[] = {
+        {{-1, -1, 10}, {1, -1, 10}, {0, 1, 10}},
+        {{-1, -1,  2}, {1, -1,  2}, {0, 1,  2}},
+        {{-1, -1,  7}, {1, -1,  7}, {0, 1,  7}},
+        {{-1, -1,  4}, {1, -1,  4}, {0, 1,  4}},
+        {{-1, -1, 15}, {1, -1, 15}, {0, 1, 15}},
+    };
+
+    BVH bvh;
+    memset(&bvh, 0, sizeof(bvh));
+    bvh_build(&bvh, tris, 5, 2);
+
+    // Should hit the nearest at z=2
+    {
+        Ray ray = {{0, 0, 0}, {0, 0, 1}};
+        HitRecord rec = bvh_intersect(&bvh, ray, 0.0f, FLT_MAX);
+        assert(rec.hit && fabsf(rec.t - 2.0f) < 1e-4f);
+    }
+    // With t_min=3, should skip z=2 and hit z=4
+    {
+        Ray ray = {{0, 0, 0}, {0, 0, 1}};
+        HitRecord rec = bvh_intersect(&bvh, ray, 3.0f, FLT_MAX);
+        assert(rec.hit && fabsf(rec.t - 4.0f) < 1e-4f);
+    }
+    // With t_max=1, should miss everything
+    {
+        Ray ray = {{0, 0, 0}, {0, 0, 1}};
+        HitRecord rec = bvh_intersect(&bvh, ray, 0.0f, 1.0f);
+        assert(!rec.hit);
+    }
+    // From the other side — ray going -Z from z=20
+    {
+        Ray ray = {{0, 0, 20}, {0, 0, -1}};
+        HitRecord rec = bvh_intersect(&bvh, ray, 0.0f, FLT_MAX);
+        assert(rec.hit && fabsf(rec.t - 5.0f) < 1e-4f);
+    }
+
+    bvh_free(&bvh);
+    printf("[PASS] bvh depth layers\n");
+}
+
+static void test_bvh_scattered_clusters() {
+    // Three clusters of triangles in different octants of space
+    Triangle tris[] = {
+        // Cluster A — near origin
+        {{-1, -1, -1}, {1, -1, -1}, {0, 1, -1}},
+        {{-1, -1,  1}, {1, -1,  1}, {0, 1,  1}},
+
+        // Cluster B — far positive X
+        {{20, -1, -1}, {22, -1, -1}, {21, 1, -1}},
+        {{20, -1,  1}, {22, -1,  1}, {21, 1,  1}},
+
+        // Cluster C — far negative Y
+        {{-1, -20, -1}, {1, -20, -1}, {0, -18, -1}},
+        {{-1, -20,  1}, {1, -20,  1}, {0, -18,  1}},
+    };
+
+    BVH bvh;
+    memset(&bvh, 0, sizeof(bvh));
+    bvh_build(&bvh, tris, 6, 2);
+
+    // Hit cluster B
+    {
+        Ray ray = {{21, 0, -5}, {0, 0, 1}};
+        HitRecord rec = bvh_intersect(&bvh, ray, 0.0f, FLT_MAX);
+        assert(rec.hit && fabsf(rec.t - 4.0f) < 1e-4f);
+    }
+    // Hit cluster C
+    {
+        Ray ray = {{0, -19, -5}, {0, 0, 1}};
+        HitRecord rec = bvh_intersect(&bvh, ray, 0.0f, FLT_MAX);
+        assert(rec.hit && fabsf(rec.t - 4.0f) < 1e-4f);
+    }
+    // Miss — ray between all clusters
+    {
+        Ray ray = {{10, -10, -5}, {0, 0, 1}};
+        HitRecord rec = bvh_intersect(&bvh, ray, 0.0f, FLT_MAX);
+        assert(!rec.hit);
+    }
+
+    bvh_free(&bvh);
+    printf("[PASS] bvh scattered clusters\n");
+}
 
 int main() {
     test_vec3_basics();
@@ -492,6 +642,10 @@ int main() {
     test_bvh_single_triangle();
     test_bvh_two_triangles_closest_hit();
     test_bvh_separated_triangles();
+
+    test_bvh_grid_of_triangles();
+    test_bvh_depth_layers();
+    test_bvh_scattered_clusters();
 
     printf("\nAll tests passed.\n");
     return 0;
